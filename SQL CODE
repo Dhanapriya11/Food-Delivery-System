@@ -1,0 +1,147 @@
+-- Create the database
+CREATE DATABASE FoodDeliveryDBS;
+
+-- Use the database
+USE FoodDeliveryDBS;
+
+-- Create the Customers table
+CREATE TABLE Customers (
+    customer_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    address VARCHAR(255) NOT NULL,
+    phone VARCHAR(15) NOT NULL UNIQUE
+);
+
+-- Create the DeliveryPersons table (for delivery person login)
+CREATE TABLE DeliveryPersons (
+    delivery_person_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+
+-- Insert a default delivery person (with a common password for login)
+INSERT INTO DeliveryPersons (name, password) VALUES ('John Doe', 'delivery123');
+
+-- Create the RestaurantStaff table (for restaurant staff login)
+CREATE TABLE RestaurantStaff (
+    staff_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+
+-- Insert a default restaurant staff (with a common password for login)
+INSERT INTO RestaurantStaff (name, password) VALUES ('Admin', 'admin123');
+
+-- Create the Menu (Food Items) table
+CREATE TABLE Menu (
+    item_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    price DECIMAL(10, 2) NOT NULL
+);
+
+-- Insert some sample food items
+INSERT INTO Menu (name, price) VALUES
+('Pizza', 10.99),
+('Burger', 5.99),
+('Soda', 1.99);
+
+-- Create the Orders table
+CREATE TABLE Orders (
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT,
+    status VARCHAR(50) DEFAULT 'Pending',
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
+);
+
+-- Create the OrderDetails table (to store items ordered in each order)
+CREATE TABLE OrderDetails (
+    order_detail_id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT,
+    item_id INT,
+    quantity INT DEFAULT 1,
+    FOREIGN KEY (order_id) REFERENCES Orders(order_id),
+    FOREIGN KEY (item_id) REFERENCES Menu(item_id)
+);
+
+-- Create the DeliveryStatus table (to track delivery status of each order)
+CREATE TABLE DeliveryStatus (
+    delivery_status_id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT,
+    delivery_person_id INT,
+    status VARCHAR(50),
+    delivery_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES Orders(order_id),
+    FOREIGN KEY (delivery_person_id) REFERENCES DeliveryPersons(delivery_person_id)
+);
+
+-- Create stored procedure for placing an order
+DELIMITER $$
+
+CREATE PROCEDURE PlaceOrder(
+    IN customer_id INT,
+    IN item_ids TEXT, -- Comma-separated list of item IDs (e.g., '1,2,3')
+    IN quantity INT
+)
+BEGIN
+    DECLARE order_id INT;
+    
+    -- Insert a new order
+    INSERT INTO Orders (customer_id, status) VALUES (customer_id, 'Pending');
+    SET order_id = LAST_INSERT_ID();
+    
+    -- Insert order details for each item
+    SET @item_list = item_ids;
+    SET @item_list_length = LENGTH(@item_list) - LENGTH(REPLACE(@item_list, ',', '')) + 1;
+    
+    WHILE @item_list_length > 0 DO
+        SET @item_id = SUBSTRING_INDEX(@item_list, ',', 1);
+        INSERT INTO OrderDetails (order_id, item_id, quantity) VALUES (order_id, @item_id, quantity);
+        SET @item_list = SUBSTRING(@item_list, LENGTH(@item_id) + 2);
+        SET @item_list_length = LENGTH(@item_list) - LENGTH(REPLACE(@item_list, ',', '')) + 1;
+    END WHILE;
+END $$
+
+DELIMITER ;
+
+-- Create stored procedure for updating order status
+DELIMITER $$
+
+CREATE PROCEDURE UpdateOrderStatus(
+    IN order_id INT,
+    IN status VARCHAR(50)
+)
+BEGIN
+    UPDATE Orders SET status = status WHERE order_id = order_id;
+END $$
+
+DELIMITER ;
+
+-- Create trigger to automatically track order delivery status when the status changes
+DELIMITER $$
+
+CREATE TRIGGER OrderStatusChange
+AFTER UPDATE ON Orders
+FOR EACH ROW
+BEGIN
+    IF NEW.status = 'Delivered' THEN
+        INSERT INTO DeliveryStatus (order_id, delivery_person_id, status) 
+        VALUES (NEW.order_id, 1, 'Delivered'); -- Assuming delivery person with ID 1
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Create view for Active Orders (Orders that are still 'Pending' or 'In-Progress')
+CREATE VIEW ActiveOrders AS
+SELECT o.order_id, c.name AS customer_name, o.status, m.name AS menu_item, od.quantity
+FROM Orders o
+JOIN Customers c ON o.customer_id = c.customer_id
+JOIN OrderDetails od ON o.order_id = od.order_id
+JOIN Menu m ON od.item_id = m.item_id
+WHERE o.status IN ('Pending', 'In-Progress');
+
+-- Add indexes on frequently queried columns
+CREATE INDEX idx_customer_id ON Orders(customer_id);
+CREATE INDEX idx_item_id ON OrderDetails(item_id);
+CREATE INDEX idx_order_id ON DeliveryStatus(order_id);
+CREATE INDEX idx_delivery_person_id ON DeliveryStatus(delivery_person_id);
