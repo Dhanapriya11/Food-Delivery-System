@@ -1,0 +1,341 @@
+package onlinefodd;
+import java.sql.*;
+import java.util.*;
+
+public class FoodDeliveryApp {
+
+    // Database connection class
+    public static class DBConnection {
+        private static final String DB_URL = "jdbc:mysql://localhost:3306/FoodDeliveryDBS";
+        private static final String DB_USER = "root";  // your MySQL username
+        private static final String DB_PASSWORD = "23AM012@SECE";  // your MySQL password
+
+        public static Connection getConnection() throws SQLException {
+            return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+        }
+    }
+
+    // Customer class
+    public static class Customer {
+        private int customerId;
+        private String name;
+        private String address;
+        private String phone;
+
+        public Customer(int customerId, String name, String address, String phone) {
+            this.customerId = customerId;
+            this.name = name;
+            this.address = address;
+            this.phone = phone;
+        }
+
+        public int getCustomerId() {
+            return customerId;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getAddress() {
+            return address;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+    }
+
+    // DAO for customer operations
+    public static class CustomerDAO {
+
+        // Register a new customer
+        public static boolean registerCustomer(String name, String address, String phone) {
+            String query = "INSERT INTO Customers (name, address, phone) VALUES (?, ?, ?)";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setString(1, name);
+                stmt.setString(2, address);
+                stmt.setString(3, phone);
+                int rowsAffected = stmt.executeUpdate();
+                return rowsAffected > 0;
+            } catch (SQLException e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        // Login for existing customer
+        public static Customer loginCustomer(String phone) {
+            String query = "SELECT * FROM Customers WHERE phone = ?";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setString(1, phone);
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    int customerId = rs.getInt("customer_id");
+                    String name = rs.getString("name");
+                    String address = rs.getString("address");
+                    return new Customer(customerId, name, address, phone);
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+    }
+
+    // FoodItem class
+    public static class FoodItem {
+        private int itemId;
+        private String name;
+        private double price;
+
+        public FoodItem(int itemId, String name, double price) {
+            this.itemId = itemId;
+            this.name = name;
+            this.price = price;
+        }
+
+        public int getItemId() {
+            return itemId;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public double getPrice() {
+            return price;
+        }
+    }
+
+    // DAO for order operations
+    public static class OrderDAO {
+
+        // Place a new order
+        public static boolean placeOrder(int customerId, List<FoodItem> items) {
+            String insertOrderQuery = "INSERT INTO Orders (customer_id, status) VALUES (?, ?)";
+            String insertOrderDetailsQuery = "INSERT INTO OrderDetails (order_id, item_id, quantity) VALUES (?, ?, ?)";
+
+            try (Connection conn = DBConnection.getConnection()) {
+                conn.setAutoCommit(false); // Start transaction
+
+                // Insert the order into Orders table
+                PreparedStatement orderStmt = conn.prepareStatement(insertOrderQuery, Statement.RETURN_GENERATED_KEYS);
+                orderStmt.setInt(1, customerId);
+                orderStmt.setString(2, "Pending");
+                int rowsAffected = orderStmt.executeUpdate();
+                if (rowsAffected > 0) {
+                    ResultSet rs = orderStmt.getGeneratedKeys();
+                    if (rs.next()) {
+                        int orderId = rs.getInt(1);
+
+                        // Insert the order details into OrderDetails table
+                        PreparedStatement detailsStmt = conn.prepareStatement(insertOrderDetailsQuery);
+                        for (FoodItem item : items) {
+                            detailsStmt.setInt(1, orderId);
+                            detailsStmt.setInt(2, item.getItemId());
+                            detailsStmt.setInt(3, 1); // Default to 1 item for simplicity
+                            detailsStmt.addBatch();
+                        }
+                        detailsStmt.executeBatch();
+
+                        // Commit transaction
+                        conn.commit();
+                        return true;
+                    }
+                }
+                conn.rollback();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return false;
+        }
+    }
+
+    // DAO for delivery status updates
+    public static class DeliveryDAO {
+
+        // Update the delivery status of an order
+        public static boolean updateDeliveryStatus(int orderId, int deliveryPersonId, String status) {
+            String query = "INSERT INTO DeliveryStatus (order_id, delivery_person_id, status) VALUES (?, ?, ?)";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setInt(1, orderId);
+                stmt.setInt(2, deliveryPersonId);
+                stmt.setString(3, status);
+                int rowsAffected = stmt.executeUpdate();
+                return rowsAffected > 0;
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return false;
+        }
+
+        // Verify delivery person login
+        public static boolean verifyDeliveryPersonLogin(String password) {
+            String query = "SELECT * FROM DeliveryPersons WHERE password = ?";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setString(1, password);
+                ResultSet rs = stmt.executeQuery();
+                return rs.next();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return false;
+        }
+    }
+
+    // Restaurant Staff class
+    public static class RestaurantStaff {
+        private static final String COMMON_PASSWORD = "admin123";
+
+        // Verify restaurant staff login
+        public static boolean verifyStaffLogin(String password) {
+            return COMMON_PASSWORD.equals(password);
+        }
+
+        // Add a new food item to the menu
+        public static boolean addMenuItem(String name, double price) {
+            String query = "INSERT INTO Menu (name, price) VALUES (?, ?)";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setString(1, name);
+                stmt.setDouble(2, price);
+                int rowsAffected = stmt.executeUpdate();
+                return rowsAffected > 0;
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+            return false;
+        }
+    }
+
+    // Main application to drive the flow
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        List<FoodItem> menu = new ArrayList<>();
+        menu.add(new FoodItem(1, "Pizza", 10.99));
+        menu.add(new FoodItem(2, "Burger", 5.99));
+        menu.add(new FoodItem(3, "Soda", 1.99));
+
+        while (true) {
+            System.out.println("Welcome to the Food Delivery System");
+            System.out.println("1. Register (New Customer)");
+            System.out.println("2. Login (Existing Customer)");
+            System.out.println("3. Login as Delivery Person");
+            System.out.println("4. Login as Restaurant Staff");
+            System.out.println("5. Exit");
+            System.out.print("Enter choice: ");
+            int choice = scanner.nextInt();
+            scanner.nextLine(); // Consume newline
+
+            if (choice == 1) {
+                // Register new customer
+                System.out.println("Enter your name:");
+                String name = scanner.nextLine();
+                System.out.println("Enter your address:");
+                String address = scanner.nextLine();
+                System.out.println("Enter your phone number:");
+                String phone = scanner.nextLine();
+                boolean success = CustomerDAO.registerCustomer(name, address, phone);
+                if (success) {
+                    System.out.println("Customer registered successfully.");
+                } else {
+                    System.out.println("Customer registration failed.");
+                }
+            } else if (choice == 2) {
+                // Login existing customer
+                System.out.println("Enter your phone number:");
+                String phone = scanner.nextLine();
+                Customer customer = CustomerDAO.loginCustomer(phone);
+                if (customer != null) {
+                    System.out.println("Welcome, " + customer.getName() + "!");
+                    List<FoodItem> orderItems = new ArrayList<>();
+                    while (true) {
+                        // Browse menu
+                        System.out.println("Browse menu:");
+                        for (FoodItem item : menu) {
+                            System.out.println(item.getItemId() + ". " + item.getName() + " - $" + item.getPrice());
+                        }
+                        System.out.println("Enter the item ID to order or 0 to complete order:");
+                        int itemId = scanner.nextInt();
+                        scanner.nextLine(); // Consume newline
+
+                        if (itemId == 0) {
+                            // Complete order
+                            boolean orderSuccess = OrderDAO.placeOrder(customer.getCustomerId(), orderItems);
+                            if (orderSuccess) {
+                                System.out.println("Order placed successfully!");
+                            } else {
+                                System.out.println("Order failed. Please try again.");
+                            }
+                            break;
+                        } else {
+                            // Add item to order
+                            FoodItem item = menu.stream().filter(i -> i.getItemId() == itemId).findFirst().orElse(null);
+                            if (item != null) {
+                                orderItems.add(item);
+                                System.out.println("Item added to your order.");
+                            } else {
+                                System.out.println("Invalid item ID.");
+                            }
+                        }
+                    }
+                } else {
+                    System.out.println("Customer not found. Please register first.");
+                }
+            } else if (choice == 3) {
+                // Delivery person login and update delivery status
+                System.out.println("Enter your password:");
+                String password = scanner.nextLine();
+                if (DeliveryDAO.verifyDeliveryPersonLogin(password)) {
+                    System.out.println("Delivery Person login successful.");
+                    System.out.println("Enter the order ID to update delivery status:");
+                    int orderId = scanner.nextInt();
+                    scanner.nextLine(); // Consume newline
+                    System.out.println("Enter the delivery status (Pending, Delivered):");
+                    String status = scanner.nextLine();
+                    boolean statusUpdated = DeliveryDAO.updateDeliveryStatus(orderId, 1, status); // Assuming delivery person ID is 1
+                    if (statusUpdated) {
+                        System.out.println("Delivery status updated successfully.");
+                    } else {
+                        System.out.println("Failed to update delivery status.");
+                    }
+                } else {
+                    System.out.println("Invalid password for Delivery Person.");
+                }
+            } else if (choice == 4) {
+                // Restaurant staff login and manage menu
+                System.out.println("Enter password for restaurant staff:");
+                String password = scanner.nextLine();
+                if (RestaurantStaff.verifyStaffLogin(password)) {
+                    System.out.println("Restaurant Staff login successful.");
+                    System.out.println("Enter the name of the new menu item:");
+                    String name = scanner.nextLine();
+                    System.out.println("Enter the price of the new menu item:");
+                    double price = scanner.nextDouble();
+                    scanner.nextLine(); // Consume newline
+
+                    boolean itemAdded = RestaurantStaff.addMenuItem(name, price);
+                    if (itemAdded) {
+                        System.out.println("New menu item added successfully.");
+                    } else {
+                        System.out.println("Failed to add new menu item.");
+                    }
+                } else {
+                    System.out.println("Invalid password for Restaurant Staff.");
+                }
+            } else if (choice == 5) {
+                System.out.println("Thank you for using the Food Delivery System!");
+                break;
+            } else {
+                System.out.println("Invalid choice, please try again.");
+            }
+        }
+
+        scanner.close();
+    }
+}
